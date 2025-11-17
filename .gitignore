@@ -43,3 +43,4 @@
 .vscode
 .clangd
 build
+examples/*_stat.*

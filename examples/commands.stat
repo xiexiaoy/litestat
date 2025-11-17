@@ -1,0 +1,7 @@
+# test commands
+namespace example
+
+GET: eloqdata.eloqdoc.getkv
+SET: eloqdata.eloqdoc.setkv
+COMMIT: eloqdata.eloqdoc.commit
+ABORT: eloqdata.eloqdoc.abort

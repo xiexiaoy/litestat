@@ -27,7 +27,13 @@ set_target_properties(litestat PROPERTIES
 include(GNUInstallDirs)
 install(TARGETS litestat
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/litestat
 )
 
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# Install headers under include/litestat so users can use
+#   #include <litestat/xxx.h>
+install(DIRECTORY include/litestat/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/litestat)
+option(BUILD_EXAMPLES "Build example executable" ON)
+if (BUILD_EXAMPLES)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/examples)
+endif()
