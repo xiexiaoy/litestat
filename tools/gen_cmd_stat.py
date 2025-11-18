@@ -56,7 +56,7 @@ def generate_header(namespace, commands, header_path):
         for sym, lit in commands:
             h.write(f"class CmdStat_{sym} final : public litestat::CmdStatBase {{\n")
             h.write("public:\n")
-            h.write(f'    CmdStat_{sym}() : CmdStatBase("{lit}") {{}}\n')
+            h.write(f'    CmdStat_{sym}() : CmdStatBase("{lit.lower()}") {{}}\n')
             h.write("    void OnEndStat(const litestat::Record &record) override;\n")
             h.write("    void ExportAndReset(\n")
             h.write("        std::back_insert_iterator<std::vector<litestat::ExportCmdStat>> out) override;\n")
@@ -82,6 +82,9 @@ def generate_cpp(namespace, commands, header_path, cpp_path):
 
         if namespace:
             cpp.write(f"namespace {namespace} {{\n\n")
+        for sym, lit in commands:
+            cpp.write(f"{namespace}::CmdStat_{sym} {sym.lower()}_stat;\n")
+        cpp.write("\n")
 
         for sym, lit in commands:
             cpp.write(f"thread_local litestat::TLSCmdStat::Uptr CmdStat_{sym}::tls_cmd_stat_;\n")
@@ -93,6 +96,23 @@ def generate_cpp(namespace, commands, header_path, cpp_path):
             cpp.write("}\n\n")
             cpp.write(f"void CmdStat_{sym}::ExportAndReset(\n")
             cpp.write("     std::back_insert_iterator<std::vector<litestat::ExportCmdStat>> out) {\n");
+            cpp.write("    std::lock_guard<std::mutex> lk(cmd_stat_mux_);\n")
+            cpp.write("    std::map<int64_t, litestat::ExportCmdStat> aggregate_map;\n")
+            cpp.write("    for (litestat::TLSCmdStat *tls_stat : cmd_stat_) {\n")
+            cpp.write("        std::vector<litestat::CodeStat> code_stat_vec;\n")
+            cpp.write("        tls_stat->Swap(code_stat_vec);\n")
+            cpp.write("        for (const litestat::CodeStat &code_stat : code_stat_vec) {\n")
+            cpp.write("            auto [it, inserted] = aggregate_map.try_emplace(\n")
+            cpp.write("                code_stat.status_code_, CmdName(), code_stat);\n")
+            cpp.write("            if (!inserted) {\n")
+            cpp.write("                litestat::ExportCmdStat &export_cmd_stat = it->second;\n")
+            cpp.write("                export_cmd_stat << code_stat;\n")
+            cpp.write("            }\n")
+            cpp.write("        }\n")
+            cpp.write("    }\n")
+            cpp.write("    for (const auto &[status_code, export_cmd_stat] : aggregate_map) {\n")
+            cpp.write("        *out++ = export_cmd_stat;\n")
+            cpp.write("    }\n")
             cpp.write("}\n\n")
             cpp.write(f"void CmdStat_{sym}::EnsureTLSCmdStat(std::thread::id thread_id) {{\n")
             cpp.write("    if (tls_cmd_stat_ == nullptr) {\n")

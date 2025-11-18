@@ -15,10 +15,10 @@ struct CodeStat
         : status_code_(status_code),
           requests_(0),
           max_latency_(0),
-          min_latency_(0),
+          min_latency_(INT64_MAX),
           sum_latency_(0),
           max_value_(0),
-          min_value_(0),
+          min_value_(INT64_MAX),
           sum_value_(0)
     {
     }

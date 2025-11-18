@@ -17,7 +17,7 @@ public:
     {
         bool operator()(const char *lhs, const char *rhs) const
         {
-            return strcmp(lhs, rhs) == -1;
+            return strcmp(lhs, rhs) < 0;
         }
     };
 
@@ -35,7 +35,12 @@ public:
     void RegisterCommand(CmdStatBase *cmd_stat)
     {
         std::lock_guard<std::mutex> lk(mutex_);
-        stat_map_.emplace(cmd_stat->CmdName(), cmd_stat);
+        auto [it, inserted] =
+            stat_map_.try_emplace(cmd_stat->CmdName(), cmd_stat);
+        if (!inserted)
+        {
+            std::abort();
+        }
     }
 
     std::vector<ExportCmdStat> ExportAndReset()
@@ -46,7 +51,7 @@ public:
         {
             cmd_stat->ExportAndReset(std::back_inserter(exports));
         }
-        return {};
+        return exports;
     }
 
 private:

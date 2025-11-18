@@ -14,14 +14,12 @@ void Record::EndStat()
 void Record::EndStat(int64_t status_code)
 {
     status_code_ = status_code;
-    status_code_ptr_ = &status_code_;
     EndStat();
 }
 
 void Record::EndStat(int64_t status_code, int64_t value)
 {
     value_ = value;
-    value_ptr_ = &value_;
     EndStat(status_code);
 }
 }  // namespace litestat

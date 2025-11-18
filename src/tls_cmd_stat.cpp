@@ -11,7 +11,7 @@ void TLSCmdStat::OnEndStat(const Record &record)
 {
     std::lock_guard<SpinLock> lk(spin_lock_);
 
-    CodeStat &stat = TryEmplace(*record.status_code_ptr_);
+    CodeStat &stat = TryEmplace(record.status_code_);
 
     auto time_delta = std::chrono::duration_cast<std::chrono::microseconds>(
         record.end_time_ - record.begin_time_);
@@ -27,15 +27,15 @@ void TLSCmdStat::OnEndStat(const Record &record)
     }
     stat.sum_latency_ += time_delta;
 
-    stat.sum_value_ += *record.value_ptr_;
-    if (*record.value_ptr_ > stat.max_value_)
+    if (record.value_ > stat.max_value_)
     {
-        stat.max_value_ = *record.value_ptr_;
+        stat.max_value_ = record.value_;
     }
-    if (*record.value_ptr_ < stat.min_value_)
+    if (record.value_ < stat.min_value_)
     {
-        stat.min_value_ = *record.value_ptr_;
+        stat.min_value_ = record.value_;
     }
+    stat.sum_value_ += record.value_;
 }
 
 void TLSCmdStat::Swap(std::vector<CodeStat> &ordered_vec)

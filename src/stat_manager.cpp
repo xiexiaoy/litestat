@@ -6,10 +6,11 @@
 #include <iomanip>
 #include <mutex>
 #include <thread>
+#include <unistd.h>
 
+#include "litestat/cmd_registry.h"
 #include "litestat/cmd_stat.h"
 #include "litestat/file_ostream.h"
-#include "litestat/cmd_registry.h"
 
 namespace litestat
 {
@@ -21,6 +22,7 @@ StatManager &StatManager::Instance()
 
 void StatManager::Init(const char *filepath, int16_t window_sec)
 {
+    pid_ = getgid();
     filepath = filepath;
     if (filepath != nullptr)
     {
@@ -44,11 +46,25 @@ void StatManager::Init(const char *filepath, int16_t window_sec)
 
 void StatManager::OutputLoop()
 {
+    bool shutdown = false;
     while (true)
     {
-        std::this_thread::sleep_for(std::chrono::seconds(window_sec_));
-        std::vector<ExportCmdStat> exports = CmdRegistry::Instance().ExportAndReset();
-        PrettyPrint(exports);
+        std::unique_lock<std::mutex> lk(sleep_mux_);
+        shutdown = sleep_cv_.wait_for(
+            lk,
+            std::chrono::seconds(window_sec_),
+            [this] { return shutdown_.load(std::memory_order_acquire); });
+
+        if (!shutdown_)
+        {
+            std::vector<ExportCmdStat> exports =
+                CmdRegistry::Instance().ExportAndReset();
+            PrettyPrint(exports);
+        }
+        else
+        {
+            break;
+        }
     }
 }
 
@@ -72,8 +88,7 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
     for (size_t i = 0; i < headers.size(); i++)
         widths[i] = headers[i].size();
 
-    // 根据数据更新列宽
-    for (const auto &s : exports)
+    auto update_cols_width = [&](const ExportCmdStat &s)
     {
         int64_t avg_latency =
             s.requests_ > 0 ? s.sum_latency_.count() / s.requests_ : 0;
@@ -91,7 +106,16 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
 
         for (size_t i = 0; i < cols.size(); i++)
             widths[i] = std::max(widths[i], cols[i].size());
+    };
+
+    // 根据数据更新列宽
+    for (const ExportCmdStat &s : exports)
+    {
+        update_cols_width(s);
     }
+
+    ExportCmdStat tail = Aggregate(exports);
+    update_cols_width(tail);
 
     // 计算表格总宽度（包括每列后面的 2 个空格）
     size_t total_width = 0;
@@ -103,16 +127,16 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
         // 生成时间字符串
         char ts[32];
         std::time_t t = std::time(nullptr);
-        std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M", std::localtime(&t));
+        std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
 
-        std::string mid = std::string(" ") + ts + " ";
+        std::string mid =  std::string(" ") + ts + " PID-" + std::to_string(pid_) + " ";
 
         // 左边“==”
-        os << "==";
+        os << "================";
 
         // 剩余宽度 = 总宽度 - "=="*2 - 时间段长度
         size_t remaining =
-            total_width > mid.size() + 4 ? (total_width - mid.size() - 4) : 0;
+            total_width > mid.size() + 32 ? (total_width - mid.size() - 32) : 0;
 
         // 中间部分
         os << mid;
@@ -120,7 +144,7 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
         // 右侧填 '='
         os << std::string(remaining, '=');
 
-        os << "==" << "\n";
+        os << "================" << "\n";
     }
 
     // 打印表头
@@ -128,16 +152,11 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
         os << std::left << std::setw(widths[i] + 2) << headers[i];
     os << "\n";
 
-    // 分隔线
-    os << std::string(total_width, '-') << "\n";
-
-    // 内容
-    for (const auto &s : exports)
+    auto output_line = [&](const ExportCmdStat &s)
     {
-        float avg_latency =
-            s.requests_ > 0 ? s.sum_latency_.count() / (float) s.requests_ : 0;
-        float avg_value =
-            s.requests_ > 0 ? s.sum_value_ / (float) s.requests_ : 0;
+        int64_t avg_latency =
+            s.requests_ > 0 ? s.sum_latency_.count() / s.requests_ : 0;
+        int64_t avg_value = s.requests_ > 0 ? s.sum_value_ / s.requests_ : 0;
 
         std::vector<std::string> cols = {s.cmd_name_ ? s.cmd_name_ : "",
                                          std::to_string(s.status_code_),
@@ -152,7 +171,30 @@ void StatManager::PrettyPrint(const std::vector<ExportCmdStat> &exports)
         for (size_t i = 0; i < cols.size(); i++)
             os << std::left << std::setw(widths[i] + 2) << cols[i];
         os << "\n";
+    };
+
+    // 内容
+    for (const ExportCmdStat &s : exports)
+    {
+        output_line(s);
     }
+
+    // 分隔线
+    os << std::string(total_width, '-') << "\n";
+
+    // 表尾汇总
+    output_line(tail);
+    os << "\n";
+}
+
+ExportCmdStat StatManager::Aggregate(const std::vector<ExportCmdStat> &exports)
+{
+    ExportCmdStat aggregate("AGGREGATE", CodeStat(0));
+    for (const ExportCmdStat &s : exports)
+    {
+        aggregate << s;
+    }
+    return aggregate;
 }
 
 void StatManager::Shutdown()
@@ -162,6 +204,8 @@ void StatManager::Shutdown()
         shutdown_ = true;
         sleep_cv_.notify_one();
     }
+
+    output_thread_.join();
 
     if (file_ != stdout && file_ != stderr)
     {

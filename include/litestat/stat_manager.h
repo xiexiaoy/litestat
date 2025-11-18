@@ -31,6 +31,8 @@ private:
 
     void PrettyPrint(const std::vector<ExportCmdStat> &exports);
 
+    ExportCmdStat Aggregate(const std::vector<ExportCmdStat> &exports);
+
     struct CStrLess
     {
         bool operator()(const char *lhs, const char *rhs) const
@@ -41,11 +43,12 @@ private:
 
 private:
     std::atomic<bool> initialized_{false};
+    pid_t pid_;
     const char *filepath_{nullptr};
     FILE *file_{stdout};
     int16_t window_sec_{-1};
 
-    bool shutdown_;
+    std::atomic<bool> shutdown_;
     std::mutex sleep_mux_;
     std::condition_variable sleep_cv_;
     std::thread output_thread_;
